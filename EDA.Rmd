@@ -1,0 +1,261 @@
+---
+title: "EDA"
+output: html_document
+date: "2024-09-21"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(dplyr)
+library(tidyverse)
+library(ggplot2)
+```
+
+## EDA
+
+```{r data}
+current_folder <- getwd()
+athletes_raw <- read.csv(file.path(current_folder, "data/athlete_events.csv"))
+noc <- read.csv(file.path(current_folder, "data/noc_regions.csv"))
+athletes <- merge(athletes_raw, noc, by = "NOC") %>%
+  select('ID','Sex','Team','Age','Weight','Height','NOC','Year','Season','Sport','Event','Medal','region') %>% 
+  rename_at('region', ~'AthleteCountry') %>%
+  mutate(WeightHeightRation = Weight/Height)
+
+games <- read.csv(file.path(current_folder, "data/olympicgames.csv")) %>%
+  select('Country','Year')
+
+# For now, to simplify lets use 2016 GPD and Population
+countries_gdp <-read.csv(file.path(current_folder, "data/countries_gdp_per_capita.csv")) %>%
+  select('CountryName','X2016') %>%
+  rename_at('X2016', ~'GDP') %>%
+  mutate(GDP = as.integer(GDP)) %>%
+  mutate(GDP = GDP/1000000)
+
+countries_pop <- read.csv(file.path(current_folder, "data/countries_pop.csv")) %>% 
+  select('CountryName','X2016') %>%
+  rename_at('X2016', ~'Population') %>%
+  mutate(Population = Population/1000000)
+
+head(athletes)
+head(games)
+head(countries_gdp)
+head(countries_pop)
+```
+
+## Cleaning
+
+```{r pressure, echo=FALSE}
+# Clean country data in games table
+setdiff(games$Country, athletes$AthleteCountry)
+# Same name for different countries
+country_mapping <- setNames(c('USA', 'UK', 'Germany', 'Russia', 'Serbia'),c('United States', 'United Kingdom', 'FR Germany', 'Soviet Union', 'Yugoslavia'))
+games <- games %>%
+  mutate(Country = ifelse(Country %in% names(country_mapping), country_mapping[as.character(Country)], Country))
+setdiff(games$Country, athletes$AthleteCountry)
+# I no longer have differences
+
+# Clean country data in countries_pop table
+setdiff(athletes$AthleteCountry, countries_pop$CountryName)
+country_mapping <- setNames(c('USA', 'UK', 'Russia'),c('United States', 'United Kingdom', 'Russian Federation'))
+countries_pop <- countries_pop %>%
+  mutate(CountryName = ifelse(CountryName %in% names(country_mapping), country_mapping[as.character(CountryName)], CountryName))
+setdiff(athletes$AthleteCountry, countries_pop$CountryName)
+# I no longer have differences
+
+# Clean country data in countries_gdp table
+setdiff(athletes$AthleteCountry, countries_gdp$CountryName)
+country_mapping <- setNames(c('USA', 'UK', 'Russia'),c('United States', 'United Kingdom', 'Russian Federation'))
+countries_gdp <- countries_gdp %>%
+  mutate(CountryName = ifelse(CountryName %in% names(country_mapping), country_mapping[as.character(CountryName)], CountryName))
+setdiff(athletes$AthleteCountry, countries_gdp$CountryName)
+# I no longer have differences
+
+athletes %>% distinct(Year) %>% arrange(Year) 
+# From 1992 to 2016, we have Olympics every 2 years. Separation of Summer and Winter Games decision.
+# For simplifying purposes, lets group summer and winter Olympics into the same year
+year_mapping <- setNames(c(1992, 1996, 2000, 2004, 2008, 2012), c(1994, 1998, 2002, 2006, 2010, 2014))
+# Apply the mapping to the Year column
+athletes <- athletes %>%
+  mutate(AdjustedYear = ifelse(Year %in% names(year_mapping), year_mapping[as.character(Year)], Year))
+games <- games %>%
+  mutate(AdjustedYear = ifelse(Year %in% names(year_mapping), year_mapping[as.character(Year)], Year))
+
+# Null values in dataset
+null_count <- sapply(athletes, function(x) sum(is.na(x)))
+total_rows <- nrow(athletes)
+data.frame(Column = names(null_count), 
+           NullCount = null_count, 
+           NullPercentage = (null_count / total_rows) * 100)
+# We are missing 23 and 22% of values in Weight and Height columns respectively
+athletes %>% 
+  pivot_longer(cols = c('Height','Weight','Age'), names_to = "Variable", values_to = "Value") %>%
+  group_by(AdjustedYear, Variable) %>%
+  summarise(
+    TotalCount = n(),
+    NullCount = sum(is.na(Value)),
+    NullPercentage = (NullCount / TotalCount) * 100
+    ) %>%
+  ggplot(aes(x = AdjustedYear, y = NullPercentage, color = Variable)) + 
+    geom_line()
+
+athletes %>% filter(Year > 1990) %>%
+  group_by(AthleteCountry) %>% 
+  summarize(ssumnull = sum(is.na(Height))) %>% 
+  arrange(desc(ssumnull))
+# In the latest years, we have much more data about Weight and Height going from ~90% to ~0% missing values
+```
+
+## EDA
+
+We have data from 1896 to 2016:
+```{r}
+# YEAR -----------------------------------------------
+c(min(athletes$Year), max(athletes$Year))
+```
+The fist summer Summer Olympics (1896) included 9 sports, the last (2016) ones include 34.
+The fist summer Winter Olympics (1924) included 10 sports, the last (2014) ones include 15.
+
+```{r sports, message=FALSE, warning=FALSE}
+# SPORT -----------------------------------------------
+# Q1: How many sports in each season? And how the #sports per season changed with time?
+athletes %>% 
+  group_by(Season,Year) %>% summarise(n_distinct(Sport), .groups='drop') %>%
+  group_by(Season) %>% 
+  filter(Year==max(Year) | Year==min(Year))
+
+athletes %>%
+  group_by(Year, Season) %>%
+  summarize(NSports = n_distinct(Sport), .groups='drop') %>%
+  ggplot(aes(x = Year, y = NSports, color=Season)) +
+  geom_line() +
+  geom_point() +
+  labs(title = "Distinct Sports by Year by Season",
+       x = "Year",
+       y = "Number of Distinct Sports") +
+  theme_minimal()
+```
+
+Q3: Which sports have been in the Olympic games every single year?
+```{r}
+athletes %>%
+  group_by(Sport) %>%
+  summarise(Years_Present = n_distinct(AdjustedYear)) %>%
+  filter(Years_Present == n_distinct(athletes$AdjustedYear)) %>%
+  pull(Sport)
+```
+
+4: Which sports have been played just once in the Olympics?
+```{r}
+athletes %>%
+  group_by(Sport) %>%
+  summarize(YearCount = n_distinct(Year),
+            YearPlayed = first(Year[which(n_distinct(Year) == 1)])) %>%
+  filter(YearCount == 1)
+```
+
+## Height and Weight
+Q1: Is there high correlation?
+```{r}
+cor(athletes$Weight, athletes$Height, use = "complete.obs")
+```
+
+Q2: Is the height distribution of athletes different in different sports?
+```{r}
+athletes %>% 
+  filter(Sport %in% c('Basketball','Football')) %>% 
+  ggplot(aes(x = Height)) +
+  geom_histogram(binwidth = 5, fill = 'blue', color = 'black', alpha = 0.7) +
+  facet_wrap(~ Sport) +
+  theme_minimal() +
+  labs(title = 'Height Distribution by Sport', x = 'Height (cm)', y = 'Frequency')
+```
+
+Q3: T test to check if Basketball players are taller than Football players
+```{r}
+basketball_players <- athletes %>% filter(Sport == "Basketball")
+football_players <- athletes %>% filter(Sport == "Football")
+t.test(basketball_players$Height, football_players$Height, alternate='greater')
+```
+
+Q4: ANOVA Test: Is the weight distribution of athletes different in different sports?
+```{r}
+athletes %>% 
+  filter(Sport %in% c('Wrestling','Weightlifting','Judo')) %>% 
+  ggplot(aes(x = Weight)) +
+  geom_histogram(binwidth = 5, fill = 'blue', color = 'black', alpha = 0.7) +
+  facet_wrap(~ Sport) +
+  theme_minimal() +
+  labs(title = 'Weight Distribution by Sport', x = 'Weight (kg)', y = 'Frequency')
+
+weight_diffs <- athletes %>% 
+  filter(Sport %in% c('Wrestling','Weightlifting','Judo'))
+anova <- aov(Weight~Sport, data=weight_diffs)
+summary(anova)
+
+TukeyHSD(anova, conf.level = 0.95)
+plot(TukeyHSD(anova, conf.level = 0.95))
+```
+
+Q5: Has weight and height changed over time?
+Which sports have seen largest differences in weight over time?
+```{r}
+athletes %>%
+  group_by(AdjustedYear) %>%
+  summarise(
+    Mean_Height = mean(Height, na.rm=T),
+    Mean_Weight = mean(Weight, na.rm=T)
+  ) %>%
+  pivot_longer(cols = c(Mean_Height, Mean_Weight), names_to = "Metric", values_to = "Value") %>%
+  ggplot(aes(x = AdjustedYear, y = Value)) +
+  geom_line() +
+  geom_point() +
+  facet_wrap(~ Metric, scales = "free_y", ncol = 1) +
+  theme_minimal() +
+  labs(title = 'Mean Height and Weight Over Years by Sport', x = 'Year', y = 'Value')
+
+# Q5: Which sports have seen largest differences in weight over time?
+athletes %>%  
+  group_by(Sport) %>%
+  summarise(
+    Mean_Height = mean(Height, na.rm=T),
+    SD_Height = sd(Height, na.rm=T),
+    Mean_Weight = mean(Weight, na.rm=T),
+    SD_Weight = sd(Weight, na.rm=T)
+    ) %>%
+  arrange(desc(SD_Height))
+# Basketball has seen larger changes in the height of the athletes over time
+# Plot
+athletes %>%
+  filter(Sport %in% c('Basketball')) %>%
+  group_by(AdjustedYear,Sport) %>%
+  summarise( Mean_Height = mean(Height, na.rm=T) ) %>%
+  ggplot(aes(x = AdjustedYear, y = Mean_Height, color=Sport)) +
+  geom_line() +
+  geom_point() +
+  theme_minimal() +
+  labs(title = 'Mean Height Over Years by Sport', x = 'Year', y = 'Mean Weight (cm)')
+```
+
+
+Q6: Which sports have seen largest differences in weight over time?
+```{r}
+athletes %>%  
+  group_by(Sport) %>%
+  summarise(
+    Mean_Weight = mean(Weight, na.rm=T),
+    SD_Weight = sd(Weight, na.rm=T)
+  ) %>%
+  arrange(desc(SD_Weight))
+# Weightlifting, Judo and Wrestling have seen larger changes in the weight of the athletes over time
+# Plot
+athletes %>%
+  filter(Sport %in% c('Weightlifting','Judo','Wrestling')) %>%
+  group_by(AdjustedYear,Sport) %>%
+  summarise( Mean_Weight = mean(Weight, na.rm=T) ) %>%
+  ggplot(aes(x = AdjustedYear, y = Mean_Weight, color=Sport)) +
+  geom_line() +
+  geom_point() +
+  theme_minimal() +
+  labs(title = 'Mean Weight Over Years by Sport', x = 'Year', y = 'Mean Weight (Kg)')
+```
