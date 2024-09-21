@@ -1,0 +1,95 @@
+---
+title: "Cleaning"
+output: html_document
+date: "2024-09-21"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(dplyr)
+library(tidyverse)
+library(ggplot2)
+```
+
+# Load the data
+```{r data}
+current_folder <- getwd()
+athletes_raw <- read.csv(file.path(current_folder, "data/athlete_events.csv"))
+noc <- read.csv(file.path(current_folder, "data/noc_regions.csv"))
+athletes <- merge(athletes_raw, noc, by = "NOC") %>%
+  select('ID','Sex','Team','Age','Weight','Height','NOC','Year','Season','Sport','Event','Medal','region') %>% 
+  rename_at('region', ~'AthleteCountry') %>%
+  mutate(WeightHeightRation = Weight/Height)
+
+games <- read.csv(file.path(current_folder, "data/olympicgames.csv")) %>%
+  select('Country','Year')
+
+# For now, to simplify lets use 2016 GPD and Population
+countries_gdp <-read.csv(file.path(current_folder, "data/countries_gdp_per_capita.csv")) %>%
+  select('CountryName','X2016') %>%
+  rename_at('X2016', ~'GDP') %>%
+  mutate(GDP = as.integer(GDP)) %>%
+  mutate(GDP = GDP/1000000)
+
+countries_pop <- read.csv(file.path(current_folder, "data/countries_pop.csv")) %>% 
+  select('CountryName','X2016') %>%
+  rename_at('X2016', ~'Population') %>%
+  mutate(Population = Population/1000000)
+
+head(athletes)
+head(games)
+head(countries_gdp)
+head(countries_pop)
+```
+# Data Consistency
+First, we want to use the same country nomenclature in all datasets. Let's look for inconsistencies e.g. USA instead of U.S.A or United States.
+```{r}
+# Clean country data in games table
+setdiff(games$Country, athletes$AthleteCountry)
+# Same name for different countries
+country_mapping <- setNames(c('USA', 'UK', 'Germany', 'Russia', 'Serbia'),c('United States', 'United Kingdom', 'FR Germany', 'Soviet Union', 'Yugoslavia'))
+games <- games %>%
+  mutate(Country = ifelse(Country %in% names(country_mapping), country_mapping[as.character(Country)], Country))
+setdiff(games$Country, athletes$AthleteCountry)
+# I no longer have differences
+
+# Clean country data in countries_pop table
+setdiff(athletes$AthleteCountry, countries_pop$CountryName)
+country_mapping <- setNames(c('USA', 'UK', 'Russia'),c('United States', 'United Kingdom', 'Russian Federation'))
+countries_pop <- countries_pop %>%
+  mutate(CountryName = ifelse(CountryName %in% names(country_mapping), country_mapping[as.character(CountryName)], CountryName))
+setdiff(athletes$AthleteCountry, countries_pop$CountryName)
+# I no longer have differences
+
+# Clean country data in countries_gdp table
+setdiff(athletes$AthleteCountry, countries_gdp$CountryName)
+country_mapping <- setNames(c('USA', 'UK', 'Russia'),c('United States', 'United Kingdom', 'Russian Federation'))
+countries_gdp <- countries_gdp %>%
+  mutate(CountryName = ifelse(CountryName %in% names(country_mapping), country_mapping[as.character(CountryName)], CountryName))
+setdiff(athletes$AthleteCountry, countries_gdp$CountryName)
+# I no longer have differences
+```
+
+From 1992 to 2016, we have Olympics every 2 years. Separation of Summer and Winter Games decision.
+For simplifying purposes, lets group summer and winter Olympics into the same year:
+```{r}
+athletes %>% distinct(Year) %>% arrange(Year) 
+year_mapping <- setNames(c(1992, 1996, 2000, 2004, 2008, 2012), c(1994, 1998, 2002, 2006, 2010, 2014))
+athletes <- athletes %>%
+  mutate(AdjustedYear = ifelse(Year %in% names(year_mapping), year_mapping[as.character(Year)], Year))
+games <- games %>%
+  mutate(AdjustedYear = ifelse(Year %in% names(year_mapping), year_mapping[as.character(Year)], Year))
+```
+
+
+# Null values
+```{r}
+null_count <- sapply(athletes, function(x) sum(is.na(x)))
+total_rows <- nrow(athletes)
+data.frame(Column = names(null_count), 
+           NullCount = null_count, 
+           NullPercentage = (null_count / total_rows) * 100)
+```
+We are missing 3% of the *Age* column values, 23 and 22% of values in *Weight* and *Height* columns respectively.
+
+# Merge data and Save

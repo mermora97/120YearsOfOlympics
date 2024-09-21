@@ -13,39 +13,17 @@ library(ggplot2)
 
 ## EDA
 
+# Load the data
 ```{r data}
 current_folder <- getwd()
-athletes_raw <- read.csv(file.path(current_folder, "data/athlete_events.csv"))
-noc <- read.csv(file.path(current_folder, "data/noc_regions.csv"))
-athletes <- merge(athletes_raw, noc, by = "NOC") %>%
-  select('ID','Sex','Team','Age','Weight','Height','NOC','Year','Season','Sport','Event','Medal','region') %>% 
-  rename_at('region', ~'AthleteCountry') %>%
-  mutate(WeightHeightRation = Weight/Height)
+clean_data <- read.csv(file.path(current_folder, "data/clean_data.csv"))
 
-games <- read.csv(file.path(current_folder, "data/olympicgames.csv")) %>%
-  select('Country','Year')
-
-# For now, to simplify lets use 2016 GPD and Population
-countries_gdp <-read.csv(file.path(current_folder, "data/countries_gdp_per_capita.csv")) %>%
-  select('CountryName','X2016') %>%
-  rename_at('X2016', ~'GDP') %>%
-  mutate(GDP = as.integer(GDP)) %>%
-  mutate(GDP = GDP/1000000)
-
-countries_pop <- read.csv(file.path(current_folder, "data/countries_pop.csv")) %>% 
-  select('CountryName','X2016') %>%
-  rename_at('X2016', ~'Population') %>%
-  mutate(Population = Population/1000000)
-
-head(athletes)
-head(games)
-head(countries_gdp)
-head(countries_pop)
+head(clean_data)
 ```
 
 ## Cleaning
 
-```{r pressure, echo=FALSE}
+```{r echo=FALSE}
 # Clean country data in games table
 setdiff(games$Country, athletes$AthleteCountry)
 # Same name for different countries
@@ -258,4 +236,127 @@ athletes %>%
   geom_point() +
   theme_minimal() +
   labs(title = 'Mean Weight Over Years by Sport', x = 'Year', y = 'Mean Weight (Kg)')
+```
+
+## Country
+
+Q1: Has country participation increased with time?
+```{r}
+athletes %>%
+  group_by(Year, Season) %>%
+  summarize(NCountries = n_distinct(AthleteCountry), .groups='drop') %>%
+  ggplot(aes(x = Year, y = NCountries, color=Season)) +
+  geom_line() +
+  geom_point() +
+  labs(title = "Distinct Countries by Year",
+       x = "Year",
+       y = "Number of Distinct Countries") +
+  theme_minimal()
+
+athletes %>%
+  group_by(Year, Season) %>%
+  summarize(NAthletes = n_distinct(ID), .groups='drop') %>%
+  ggplot(aes(x = Year, y = NAthletes, color=Season)) +
+  geom_line() +
+  geom_point() +
+  labs(title = "#Athlethes by Year",
+       x = "Year",
+       y = "Number of Distinct Athletes by Season") +
+  theme_minimal()
+```
+
+Country (and therefore #athletes) participation in the Olympic Games has increased significantly in the last 20 years
+Higher participation in the Summer games compared to the Winter ones
+A dip in the Summer Olympic Games in 1980 - Boycott of the Moscow Olympics by US to protest against Afghanistan invasion.
+
+Q9: Which sports offer the more medals (gold medals) on average?
+```{r}
+athletes %>% 
+  filter(Year == 2016) %>%
+  group_by(Sport) %>% summarize(NMedals = sum(!is.na(Medal) & Medal=='Gold')) %>% arrange(desc(NMedals)) %>%
+  ggplot(aes(x = reorder(Sport, NMedals), y = NMedals)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  geom_text(aes(label = NMedals), size = 3, color = "black") +
+  coord_flip() +
+  labs(title = "Number of Medals by Sport",
+       x = "Sport",
+       y = "Number of Medals") +
+  theme_minimal()
+
+athletes %>% 
+  filter(Year == 2016 & !(is.na(Medal))) %>%
+  group_by(Sport, Medal) %>%
+  summarize(NMedals = sum(!is.na(Medal)), .groups = 'drop') %>%
+  mutate(Medal = factor(Medal, levels = c("Gold", "Silver", "Bronze"))) %>%
+  ggplot(aes(x = reorder(Sport, NMedals), y = NMedals, fill = Medal)) +
+  geom_bar(stat = "identity") +
+  geom_text(aes(label = NMedals), position = position_stack(vjust = 0.5), size = 3, color = "white") +
+  coord_flip() +
+  labs(title = "Number of Medals by Sport (2016)",
+       x = "Sport",
+       y = "Number of Medals") +
+  scale_fill_manual(values = c("Gold" = "gold", "Silver" = "grey", "Bronze" = "brown")) +
+  theme_minimal()
+```
+Why are there more gold medals than silver or bronze in some sports e.g. athletics?
+```{r}
+athletes %>% 
+  filter(Sport == 'Athletics' & Year == 2016 & !(is.na(Medal))) %>%
+  group_by(Event, Medal) %>%
+  summarize(NMedals = sum(!is.na(Medal)), .groups = 'drop') %>%
+  mutate(Medal = factor(Medal, levels = c("Gold", "Silver", "Bronze"))) %>%
+  ggplot(aes(x = reorder(Event, NMedals), y = NMedals, fill = Medal)) +
+  geom_bar(stat = "identity") +
+  geom_text(aes(label = NMedals), position = position_stack(vjust = 0.5), size = 3, color = "white") +
+  coord_flip() +
+  labs(title = "Number of Medals by Sport (2016)",
+       x = "Sport",
+       y = "Number of Medals") +
+  scale_fill_manual(values = c("Gold" = "gold", "Silver" = "grey", "Bronze" = "brown")) +
+  theme_minimal()
+
+athletes %>% 
+  filter(Event == "Athletics Women's 4 x 400 metres Relay" & Year == 2016 & Medal == 'Gold')
+```
+# Olympics Host Advange
+Is there a significant advantage for countries playing at home vs away?
+
+```{r}
+# Get the list of countries that have hosted
+host_countries_lst <- unique(games$Country)
+
+# Loop through the list of host countries
+for (country in host_countries_lst) {
+  
+  # Filter data for the current country
+  medals_per_country <- clean_data %>%
+    group_by(AdjustedYear, AthleteCountry) %>%
+    summarise(Medals = sum(!is.na(Medal)), .groups = 'drop')
+  
+  hosting_years <- clean_data %>%
+    filter(HomeAway == 'Home' & Country == country & Season == 'Summer') %>%
+    pull(AdjustedYear) %>%
+    unique()
+  
+  plot_data <- clean_data %>% 
+    group_by(AdjustedYear) %>% 
+    summarize(TotalMedals = sum(!is.na(Medal)), .groups = 'drop') %>%
+    left_join(medals_per_country, by = 'AdjustedYear') %>%
+    mutate(MedalsPercent = Medals / TotalMedals) %>%
+    filter(AthleteCountry == country)
+  
+  country_medals <- plot_data %>% filter(AdjustedYear %in% hosting_years)
+  
+  # Create the plot
+  p <- ggplot(data = plot_data, aes(x = AdjustedYear)) +
+    geom_bar(data = country_medals, aes(y = MedalsPercent), stat = "identity", width = 4, fill = "skyblue", alpha = 0.7) +
+    geom_line(aes(y = MedalsPercent)) +
+    labs(title = paste("Percentage of Medals Won Over Time -", country),
+         x = "Year",
+         y = "Percentage of Medals") +
+    theme_minimal()
+  
+  # Print the plot for the current country
+  print(p)
+}
 ```
