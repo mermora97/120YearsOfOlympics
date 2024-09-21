@@ -92,4 +92,23 @@ data.frame(Column = names(null_count),
 ```
 We are missing 3% of the *Age* column values, 23 and 22% of values in *Weight* and *Height* columns respectively.
 
+In the latest years, we have much more data about Weight and Height going from ~90% to ~0% missing values:
+```{r}
+#athletes %>% filter(Year > 1990) %>%
+  #group_by(AthleteCountry) %>% 
+  #summarize(ssumnull = sum(is.na(Height)), .groups='drop') %>% 
+  #arrange(desc(ssumnull))
+  
+```
+
 # Merge data and Save
+clean_data <- merge(athletes %>% select(-Year), games, by = "AdjustedYear") %>%
+  mutate(HomeAway = ifelse(Country == AthleteCountry, "Home", "Away"))
+
+current_folder <- getwd()
+write.csv(clean_data, file.path(current_folder, "data/clean_data.csv"), row.names = FALSE)
+
+# Create new columns
+- HomeAway
+- GoldMedal
+- Medal

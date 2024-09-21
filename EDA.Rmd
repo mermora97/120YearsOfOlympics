@@ -21,88 +21,25 @@ clean_data <- read.csv(file.path(current_folder, "data/clean_data.csv"))
 head(clean_data)
 ```
 
-## Cleaning
-
-```{r echo=FALSE}
-# Clean country data in games table
-setdiff(games$Country, athletes$AthleteCountry)
-# Same name for different countries
-country_mapping <- setNames(c('USA', 'UK', 'Germany', 'Russia', 'Serbia'),c('United States', 'United Kingdom', 'FR Germany', 'Soviet Union', 'Yugoslavia'))
-games <- games %>%
-  mutate(Country = ifelse(Country %in% names(country_mapping), country_mapping[as.character(Country)], Country))
-setdiff(games$Country, athletes$AthleteCountry)
-# I no longer have differences
-
-# Clean country data in countries_pop table
-setdiff(athletes$AthleteCountry, countries_pop$CountryName)
-country_mapping <- setNames(c('USA', 'UK', 'Russia'),c('United States', 'United Kingdom', 'Russian Federation'))
-countries_pop <- countries_pop %>%
-  mutate(CountryName = ifelse(CountryName %in% names(country_mapping), country_mapping[as.character(CountryName)], CountryName))
-setdiff(athletes$AthleteCountry, countries_pop$CountryName)
-# I no longer have differences
-
-# Clean country data in countries_gdp table
-setdiff(athletes$AthleteCountry, countries_gdp$CountryName)
-country_mapping <- setNames(c('USA', 'UK', 'Russia'),c('United States', 'United Kingdom', 'Russian Federation'))
-countries_gdp <- countries_gdp %>%
-  mutate(CountryName = ifelse(CountryName %in% names(country_mapping), country_mapping[as.character(CountryName)], CountryName))
-setdiff(athletes$AthleteCountry, countries_gdp$CountryName)
-# I no longer have differences
-
-athletes %>% distinct(Year) %>% arrange(Year) 
-# From 1992 to 2016, we have Olympics every 2 years. Separation of Summer and Winter Games decision.
-# For simplifying purposes, lets group summer and winter Olympics into the same year
-year_mapping <- setNames(c(1992, 1996, 2000, 2004, 2008, 2012), c(1994, 1998, 2002, 2006, 2010, 2014))
-# Apply the mapping to the Year column
-athletes <- athletes %>%
-  mutate(AdjustedYear = ifelse(Year %in% names(year_mapping), year_mapping[as.character(Year)], Year))
-games <- games %>%
-  mutate(AdjustedYear = ifelse(Year %in% names(year_mapping), year_mapping[as.character(Year)], Year))
-
-# Null values in dataset
-null_count <- sapply(athletes, function(x) sum(is.na(x)))
-total_rows <- nrow(athletes)
-data.frame(Column = names(null_count), 
-           NullCount = null_count, 
-           NullPercentage = (null_count / total_rows) * 100)
-# We are missing 23 and 22% of values in Weight and Height columns respectively
-athletes %>% 
-  pivot_longer(cols = c('Height','Weight','Age'), names_to = "Variable", values_to = "Value") %>%
-  group_by(AdjustedYear, Variable) %>%
-  summarise(
-    TotalCount = n(),
-    NullCount = sum(is.na(Value)),
-    NullPercentage = (NullCount / TotalCount) * 100
-    ) %>%
-  ggplot(aes(x = AdjustedYear, y = NullPercentage, color = Variable)) + 
-    geom_line()
-
-athletes %>% filter(Year > 1990) %>%
-  group_by(AthleteCountry) %>% 
-  summarize(ssumnull = sum(is.na(Height))) %>% 
-  arrange(desc(ssumnull))
-# In the latest years, we have much more data about Weight and Height going from ~90% to ~0% missing values
-```
-
 ## EDA
 
 We have data from 1896 to 2016:
 ```{r}
 # YEAR -----------------------------------------------
-c(min(athletes$Year), max(athletes$Year))
+c(min(clean_data$AdjustedYear), max(clean_data$AdjustedYear))
 ```
 The fist summer Summer Olympics (1896) included 9 sports, the last (2016) ones include 34.
 The fist summer Winter Olympics (1924) included 10 sports, the last (2014) ones include 15.
 
+# Sport
+Q1: How many sports in each season? And how the #sports per season changed with time?
 ```{r sports, message=FALSE, warning=FALSE}
-# SPORT -----------------------------------------------
-# Q1: How many sports in each season? And how the #sports per season changed with time?
-athletes %>% 
+clean_data %>% 
   group_by(Season,Year) %>% summarise(n_distinct(Sport), .groups='drop') %>%
   group_by(Season) %>% 
   filter(Year==max(Year) | Year==min(Year))
 
-athletes %>%
+clean_data %>%
   group_by(Year, Season) %>%
   summarize(NSports = n_distinct(Sport), .groups='drop') %>%
   ggplot(aes(x = Year, y = NSports, color=Season)) +
@@ -114,18 +51,18 @@ athletes %>%
   theme_minimal()
 ```
 
-Q3: Which sports have been in the Olympic games every single year?
+Q2: Which sports have been in the Olympic games every single year?
 ```{r}
-athletes %>%
+clean_data %>%
   group_by(Sport) %>%
   summarise(Years_Present = n_distinct(AdjustedYear)) %>%
-  filter(Years_Present == n_distinct(athletes$AdjustedYear)) %>%
+  filter(Years_Present == n_distinct(clean_data$AdjustedYear)) %>%
   pull(Sport)
 ```
 
-4: Which sports have been played just once in the Olympics?
+Q3: Which sports have been played just once in the Olympics?
 ```{r}
-athletes %>%
+clean_data %>%
   group_by(Sport) %>%
   summarize(YearCount = n_distinct(Year),
             YearPlayed = first(Year[which(n_distinct(Year) == 1)])) %>%
@@ -135,12 +72,12 @@ athletes %>%
 ## Height and Weight
 Q1: Is there high correlation?
 ```{r}
-cor(athletes$Weight, athletes$Height, use = "complete.obs")
+cor(clean_data$Weight, clean_data$Height, use = "complete.obs")
 ```
 
 Q2: Is the height distribution of athletes different in different sports?
 ```{r}
-athletes %>% 
+clean_data %>% 
   filter(Sport %in% c('Basketball','Football')) %>% 
   ggplot(aes(x = Height)) +
   geom_histogram(binwidth = 5, fill = 'blue', color = 'black', alpha = 0.7) +
@@ -151,14 +88,14 @@ athletes %>%
 
 Q3: T test to check if Basketball players are taller than Football players
 ```{r}
-basketball_players <- athletes %>% filter(Sport == "Basketball")
-football_players <- athletes %>% filter(Sport == "Football")
+basketball_players <- clean_data %>% filter(Sport == "Basketball")
+football_players <- clean_data %>% filter(Sport == "Football")
 t.test(basketball_players$Height, football_players$Height, alternate='greater')
 ```
 
 Q4: ANOVA Test: Is the weight distribution of athletes different in different sports?
 ```{r}
-athletes %>% 
+clean_data %>% 
   filter(Sport %in% c('Wrestling','Weightlifting','Judo')) %>% 
   ggplot(aes(x = Weight)) +
   geom_histogram(binwidth = 5, fill = 'blue', color = 'black', alpha = 0.7) +
@@ -166,7 +103,7 @@ athletes %>%
   theme_minimal() +
   labs(title = 'Weight Distribution by Sport', x = 'Weight (kg)', y = 'Frequency')
 
-weight_diffs <- athletes %>% 
+weight_diffs <- clean_data %>% 
   filter(Sport %in% c('Wrestling','Weightlifting','Judo'))
 anova <- aov(Weight~Sport, data=weight_diffs)
 summary(anova)
@@ -178,7 +115,7 @@ plot(TukeyHSD(anova, conf.level = 0.95))
 Q5: Has weight and height changed over time?
 Which sports have seen largest differences in weight over time?
 ```{r}
-athletes %>%
+clean_data %>%
   group_by(AdjustedYear) %>%
   summarise(
     Mean_Height = mean(Height, na.rm=T),
@@ -193,7 +130,7 @@ athletes %>%
   labs(title = 'Mean Height and Weight Over Years by Sport', x = 'Year', y = 'Value')
 
 # Q5: Which sports have seen largest differences in weight over time?
-athletes %>%  
+clean_data %>%  
   group_by(Sport) %>%
   summarise(
     Mean_Height = mean(Height, na.rm=T),
@@ -204,7 +141,7 @@ athletes %>%
   arrange(desc(SD_Height))
 # Basketball has seen larger changes in the height of the athletes over time
 # Plot
-athletes %>%
+clean_data %>%
   filter(Sport %in% c('Basketball')) %>%
   group_by(AdjustedYear,Sport) %>%
   summarise( Mean_Height = mean(Height, na.rm=T) ) %>%
@@ -218,7 +155,7 @@ athletes %>%
 
 Q6: Which sports have seen largest differences in weight over time?
 ```{r}
-athletes %>%  
+clean_data %>%  
   group_by(Sport) %>%
   summarise(
     Mean_Weight = mean(Weight, na.rm=T),
@@ -227,7 +164,7 @@ athletes %>%
   arrange(desc(SD_Weight))
 # Weightlifting, Judo and Wrestling have seen larger changes in the weight of the athletes over time
 # Plot
-athletes %>%
+clean_data %>%
   filter(Sport %in% c('Weightlifting','Judo','Wrestling')) %>%
   group_by(AdjustedYear,Sport) %>%
   summarise( Mean_Weight = mean(Weight, na.rm=T) ) %>%
@@ -242,7 +179,7 @@ athletes %>%
 
 Q1: Has country participation increased with time?
 ```{r}
-athletes %>%
+clean_data %>%
   group_by(Year, Season) %>%
   summarize(NCountries = n_distinct(AthleteCountry), .groups='drop') %>%
   ggplot(aes(x = Year, y = NCountries, color=Season)) +
@@ -253,7 +190,7 @@ athletes %>%
        y = "Number of Distinct Countries") +
   theme_minimal()
 
-athletes %>%
+clean_data %>%
   group_by(Year, Season) %>%
   summarize(NAthletes = n_distinct(ID), .groups='drop') %>%
   ggplot(aes(x = Year, y = NAthletes, color=Season)) +
@@ -269,9 +206,9 @@ Country (and therefore #athletes) participation in the Olympic Games has increas
 Higher participation in the Summer games compared to the Winter ones
 A dip in the Summer Olympic Games in 1980 - Boycott of the Moscow Olympics by US to protest against Afghanistan invasion.
 
-Q9: Which sports offer the more medals (gold medals) on average?
+Q2: Which sports offer the more medals (gold medals) on average?
 ```{r}
-athletes %>% 
+clean_data %>% 
   filter(Year == 2016) %>%
   group_by(Sport) %>% summarize(NMedals = sum(!is.na(Medal) & Medal=='Gold')) %>% arrange(desc(NMedals)) %>%
   ggplot(aes(x = reorder(Sport, NMedals), y = NMedals)) +
@@ -283,7 +220,7 @@ athletes %>%
        y = "Number of Medals") +
   theme_minimal()
 
-athletes %>% 
+clean_data %>% 
   filter(Year == 2016 & !(is.na(Medal))) %>%
   group_by(Sport, Medal) %>%
   summarize(NMedals = sum(!is.na(Medal)), .groups = 'drop') %>%
@@ -300,7 +237,7 @@ athletes %>%
 ```
 Why are there more gold medals than silver or bronze in some sports e.g. athletics?
 ```{r}
-athletes %>% 
+clean_data %>% 
   filter(Sport == 'Athletics' & Year == 2016 & !(is.na(Medal))) %>%
   group_by(Event, Medal) %>%
   summarize(NMedals = sum(!is.na(Medal)), .groups = 'drop') %>%
@@ -315,15 +252,15 @@ athletes %>%
   scale_fill_manual(values = c("Gold" = "gold", "Silver" = "grey", "Bronze" = "brown")) +
   theme_minimal()
 
-athletes %>% 
+clean_data %>% 
   filter(Event == "Athletics Women's 4 x 400 metres Relay" & Year == 2016 & Medal == 'Gold')
 ```
+
 # Olympics Host Advange
 Is there a significant advantage for countries playing at home vs away?
-
 ```{r}
 # Get the list of countries that have hosted
-host_countries_lst <- unique(games$Country)
+host_countries_lst <- unique(clean_data$Country)
 
 # Loop through the list of host countries
 for (country in host_countries_lst) {
@@ -360,3 +297,5 @@ for (country in host_countries_lst) {
   print(p)
 }
 ```
+
+# Correlation of medals to GDP or Population
