@@ -14,13 +14,18 @@ library(ggplot2)
 # Load the data
 ```{r data}
 current_folder <- getwd()
+
+# Load datasets
 athletes_raw <- read.csv(file.path(current_folder, "data/athlete_events.csv"))
 noc <- read.csv(file.path(current_folder, "data/noc_regions.csv"))
+# Merge athletes with noc (region names)
 athletes <- merge(athletes_raw, noc, by = "NOC") %>%
   select('ID','Sex','Team','Age','Weight','Height','NOC','Year','Season','Sport','Event','Medal','region') %>% 
   rename_at('region', ~'AthleteCountry') %>%
+  # Add new feature WeightHeight
   mutate(WeightHeightRation = Weight/Height)
 
+# Olympic games
 games <- read.csv(file.path(current_folder, "data/olympicgames.csv")) %>%
   select('Country','Year')
 
@@ -36,16 +41,40 @@ countries_pop <- read.csv(file.path(current_folder, "data/countries_pop.csv")) %
   rename_at('X2016', ~'Population') %>%
   mutate(Population = Population/1000000)
 
+world_data <- read.csv(file.path(current_folder, "data/world-data-2023.csv")) %>%
+  select(
+    Country,
+    Density_P_Km2 = Density..P.Km2.,
+    Agricultural_Land_Percent = Agricultural.Land....,
+    Land_Area_Km2 = Land.Area.Km2.,
+    GDP,
+    Population,
+    Urban_Population = Urban_population,
+    Life_Expectancy = Life.expectancy,
+    Gross_Tertiary_Education_Enrollment_Percent = Gross.tertiary.education.enrollment....,
+    Physicians_Per_Thousand = Physicians.per.thousand,
+    Fertility_Rate = Fertility.Rate,
+    Infant_Mortality = Infant.mortality,
+    Out_of_Pocket_Health_Expenditure_Percent = Out.of.pocket.health.expenditure,
+    Latitude,
+    Longitude,
+    Unemployment_Rate = Unemployment.rate
+  )
+
 head(athletes)
 head(games)
 head(countries_gdp)
 head(countries_pop)
+head(world_data)
 ```
 # Data Consistency
+
 First, we want to use the same country nomenclature in all datasets. Let's look for inconsistencies e.g. USA instead of U.S.A or United States.
+
 ```{r}
 # Clean country data in games table
 setdiff(games$Country, athletes$AthleteCountry)
+
 # Same name for different countries
 country_mapping <- setNames(c('USA', 'UK', 'Germany', 'Russia', 'Serbia'),c('United States', 'United Kingdom', 'FR Germany', 'Soviet Union', 'Yugoslavia'))
 games <- games %>%
@@ -53,20 +82,12 @@ games <- games %>%
 setdiff(games$Country, athletes$AthleteCountry)
 # I no longer have differences
 
-# Clean country data in countries_pop table
-setdiff(athletes$AthleteCountry, countries_pop$CountryName)
+# Clean country data in world_data
+setdiff(athletes$AthleteCountry, world_data$Country)
 country_mapping <- setNames(c('USA', 'UK', 'Russia'),c('United States', 'United Kingdom', 'Russian Federation'))
 countries_pop <- countries_pop %>%
   mutate(CountryName = ifelse(CountryName %in% names(country_mapping), country_mapping[as.character(CountryName)], CountryName))
 setdiff(athletes$AthleteCountry, countries_pop$CountryName)
-# I no longer have differences
-
-# Clean country data in countries_gdp table
-setdiff(athletes$AthleteCountry, countries_gdp$CountryName)
-country_mapping <- setNames(c('USA', 'UK', 'Russia'),c('United States', 'United Kingdom', 'Russian Federation'))
-countries_gdp <- countries_gdp %>%
-  mutate(CountryName = ifelse(CountryName %in% names(country_mapping), country_mapping[as.character(CountryName)], CountryName))
-setdiff(athletes$AthleteCountry, countries_gdp$CountryName)
 # I no longer have differences
 ```
 
@@ -101,12 +122,32 @@ In the latest years, we have much more data about Weight and Height going from ~
   
 ```
 
+# Data Types
+```{r}
+world_data <- world_data %>%
+    mutate(
+    Density_P_Km2 = as.numeric(gsub(",", "", Density_P_Km2)),
+    Agricultural_Land_Percent = as.numeric(gsub("%", "", Agricultural_Land_Percent)) / 100,
+    Land_Area_Km2 = as.numeric(gsub(",", "", Land_Area_Km2)),
+    GDP = as.numeric(gsub("[^0-9.]", "", GDP)),
+    Population = as.numeric(gsub(",", "", Population)),
+    Urban_Population = as.numeric(gsub(",", "", Urban_Population)),
+    Gross_Tertiary_Education_Enrollment_Percent = as.numeric(gsub("%", "", Gross_Tertiary_Education_Enrollment_Percent)) / 100,
+    Out_of_Pocket_Health_Expenditure_Percent = as.numeric(gsub("%", "", Out_of_Pocket_Health_Expenditure_Percent)) / 100,
+    Unemployment_Rate = as.numeric(gsub("%", "", Unemployment_Rate)) / 100
+  )
+
+write.csv(world_data, file.path(current_folder, "data/clean_world_data.csv"), row.names = FALSE)
+```
+
 # Merge data and Save
+```{r}
 clean_data <- merge(athletes %>% select(-Year), games, by = "AdjustedYear") %>%
   mutate(HomeAway = ifelse(Country == AthleteCountry, "Home", "Away"))
 
 current_folder <- getwd()
 write.csv(clean_data, file.path(current_folder, "data/clean_data.csv"), row.names = FALSE)
+```
 
 # Create new columns
 - HomeAway

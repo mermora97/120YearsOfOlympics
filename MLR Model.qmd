@@ -1,0 +1,203 @@
+---
+title: "LRM"
+format: html
+editor: visual
+---
+
+## Multiple Linear Regression Model
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(dplyr)
+library(tidyverse)
+library(ggplot2)
+library(car)
+```
+
+# Load the data
+```{r data}
+current_folder <- getwd()
+folder <- file.path(current_folder, "data/126 Years of Historical Olympic Dataset/")
+
+# Olympic_Medal_Tally_History.csv
+medals_per_country <- read.csv(file.path(folder, 'Olympic_Medal_Tally_History.csv')) %>%
+  # Filter Summer games
+  filter(str_detect(edition, "Summer")) %>%
+  mutate(TotalMedals = total, Year = year, Country = country) %>%
+  select(Year, Country, TotalMedals) 
+
+athletes <- read.csv(file.path(folder, 'Olympic_Athlete_Event_Details.csv'))
+countries <- read.csv(file.path(folder, 'Olympic_Country_Profiles.csv'))
+games <- read.csv(file.path(folder, 'Olympic_Games_Summary.csv'))
+
+# Get missing zeros (countries that won zero medals)
+no_medals <- merge(athletes, 
+                   countries, 
+                   by.x = "country_noc", by.y = "noc", all.x = TRUE) %>%
+  merge(., games, by = "edition_id") %>%
+  # Filter Summer games
+  filter(str_detect(edition.x, "Summer")) %>% 
+  mutate(WinMedal = ifelse(medal == "",0,1)) %>%
+  group_by(year, country) %>% summarize(TotalMedals = sum(WinMedal), .groups = "drop") %>%
+  filter(TotalMedals == 0) %>%
+  mutate(Year = year, Country = country) %>%
+  select(Year, Country, TotalMedals)
+
+# Bind together
+medals_per_country <- bind_rows(medals_per_country, no_medals)
+
+# Add HostCountry to medals_per_country dataset
+# Get games table with HostCountry
+games <- merge(games, countries, by.x = "country_noc", by.y = "noc") %>%
+  filter(str_detect(edition, "Summer")) %>% 
+  mutate(Year = year, HostCountry = country) %>%
+  select(Year, HostCountry)
+# Add Host attribute
+medals_per_country <- medals_per_country %>%
+  merge(games, on = 'Year') %>%
+  mutate(Host = ifelse(Country == HostCountry, 1, 0)) %>% select(-HostCountry)
+
+# World data (cleaned)
+world_data <- read.csv(file.path(current_folder, "data/clean_world_data.csv"))
+
+head(medals_per_country)
+head(world_data)
+```
+
+# Simple Model
+Lag information.
+Use only data since 1992.
+```{r}
+# Filter olympic games previous to 1992 (keep 1988)
+medals_per_country <- medals_per_country %>% filter(Year >= 1988)
+
+lagged_medals_per_country <- medals_per_country %>%
+  # Add lag medals
+  group_by(Country) %>% arrange(Year) %>% mutate(Lag_Medals = lag(TotalMedals)) %>%
+  # Remove 1988 data (Lag_Medals is NaN)
+  filter(!is.na(Lag_Medals))
+
+model <- lm(TotalMedals ~ Lag_Medals + Year, data = lagged_medals_per_country)
+summary(model)
+
+# Predict Olympics 2016 (based on lagged data from 2012)
+data_2016 <- lagged_medals_per_country %>%
+  filter(Year == 2016)
+
+data_2016$PredMedals <- predict(model, newdata = data_2016 %>% select(-TotalMedals))
+
+# Calculate MAE (Mean Absolute Error)
+errors <- data_2016$TotalMedals - data_2016$PredMedals
+cat("Mean Absolute Error (MAE):", mean(abs(errors)), "\n")
+
+# Only considering Top 15 countries
+data_2016_top15 <- data_2016 %>% arrange(desc(TotalMedals)) %>% head(15)
+errors <- data_2016_top15$TotalMedals - data_2016_top15$PredMedals
+cat("Mean Absolute Error (MAE):", mean(abs(errors)), "\n")
+```
+# Sophisticated Model
+```{r}
+# Merge lagged_medals_per_country with world country data
+
+# Countries that we dont have world data for:
+setdiff(lagged_medals_per_country$Country, 
+        world_data$Country)
+
+country_mapping <- setNames(c('United States', 'United Kingdom','Kingdom of Saudi Arabia'),
+                            c('USA', 'UK','Saudi Arabia'))
+world_data <- world_data %>%
+  mutate(Country = ifelse(Country %in% names(country_mapping),
+                          country_mapping[as.character(Country)], Country))
+
+#medals_per_country %>% filter(Country %in% diff_countries)
+```
+
+```{r}
+# Inner merge (for now)
+merged_data <- merge(lagged_medals_per_country, world_data, by = "Country")
+head(merged_data)
+
+# Add new features
+merged_data <- merged_data %>%
+  mutate(GDP_per_capita = GDP/Population,
+         ln_GDP = log(GDP),
+         ln_Pop = log(Population),
+         ln_GDP_per_capita = log(GDP_per_capita),
+         Development_Country = ifelse(GDP_per_capita > 12000, 1, 0))
+
+# New model
+lm_model <- lm(TotalMedals ~  ., data = merged_data %>% select(-Country))
+summary(lm_model)
+
+# Predict Olympics 2016
+data_2016 <- merged_data %>%
+  filter(Year == 2016)
+
+data_2016$PredMedals <- predict(lm_model, newdata = data_2016 %>% select(-TotalMedals))
+
+# Calculate MAE and MFE (Mean Forecast Error)
+errors <- data_2016$TotalMedals - data_2016$PredMedals
+cat("Mean Absolute Error (MAE):", mean(abs(errors), na.rm = TRUE), "\n")
+
+# If we only consider top15 countries
+data_2016_top15 <- data_2016 %>% arrange(desc(TotalMedals)) %>% head(15)
+errors <- data_2016_top15$TotalMedals - data_2016_top15$PredMedals
+cat("Mean Absolute Error (MAE):", mean(abs(errors), na.rm = TRUE), "\n")
+```
+
+```{r}
+# Forward selection
+# Drop null values first
+model_data <- merged_data %>% drop_na() %>% select(-Country)
+
+# Start with a null model (intercept only)
+null_model <- lm(TotalMedals ~ 1, data = model_data)
+# Full model with all predictors
+full_model <- lm(TotalMedals ~ ., data = model_data)
+# Perform forward selection
+forward_model <- step(
+  null_model,
+  scope = list(lower = null_model, upper = full_model),
+  direction = "forward"
+)
+
+# Summarize the final model
+summary(forward_model)
+vif(final_model)
+
+final_model <- lm(TotalMedals ~ Lag_Medals + GDP + Host + Development_Country + 
+    Urban_Population + ln_GDP + Latitude + Agricultural_Land_Percent + 
+    Year + Out_of_Pocket_Health_Expenditure_Percent + GDP_per_capita + Physicians_Per_Thousand + 
+    Infant_Mortality,  data = merged_data)
+
+# Predict Olympics 2016
+data_2016 <- merged_data %>%
+  filter(Year == 2016)
+
+data_2016$PredMedals <- predict(forward_model, newdata = data_2016 %>% select(-TotalMedals))
+
+# Calculate MAE and MFE (Mean Forecast Error)
+errors <- data_2016$TotalMedals - data_2016$PredMedals
+
+cat("Mean Absolute Error (MAE):", mean(abs(errors), na.rm = TRUE), "\n")
+
+# If we only consider top15 countries
+data_2016_top15 <- data_2016 %>% arrange(desc(TotalMedals)) %>% head(15)
+head(data_2016_top15 %>% select(Country, Year, TotalMedals, PredMedals))
+errors <- data_2016_top15$TotalMedals - data_2016_top15$PredMedals
+cat("Mean Absolute Error (MAE):", mean(abs(errors), na.rm = TRUE), "\n")
+
+library(car)
+vif(forward_model)
+```
+
+```{r}
+# Perform backward selection
+backward_model <- step(
+  full_model,
+  direction = "backward"
+)
+
+# Summarize the final model
+summary(backward_model)
+```
