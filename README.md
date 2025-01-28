@@ -14,7 +14,7 @@ One of the most fun parts of this project was exploring whether hosting the Olym
 ![Hosting Advantage Boost](images/hosting_advantage.jpg)
 
 ## Data Sources
-- **Olympics Dataset (Kaggle)**: 120 years of Olympics data, including athletes, events, and results.
+- **Olympics Dataset (Kaggle: https://www.kaggle.com/datasets/heesoo37/120-years-of-olympic-history-athletes-and-results)**: 120 years of Olympics data, including athletes, events, and results.
 - **Supplementary Socioeconomic Data**:
   - GDP and GDP per capita (World Bank).
   - Population (World Bank).

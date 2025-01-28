@@ -1,10 +1,8 @@
 ---
-title: "LRM"
-format: html
-editor: visual
+title: "Modeling"
+output: html_document
+date: "2024-10-11"
 ---
-
-## Multiple Linear Regression Model
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
@@ -14,10 +12,10 @@ library(ggplot2)
 library(car)
 ```
 
-# Load the data
-```{r data}
+## Load the data
+```{r}
 current_folder <- getwd()
-folder <- file.path(current_folder, "data/126 Years of Historical Olympic Dataset/")
+folder <- file.path(current_folder, "../data/126 Years of Historical Olympic Dataset/")
 
 # Olympic_Medal_Tally_History.csv
 medals_per_country <- read.csv(file.path(folder, 'Olympic_Medal_Tally_History.csv')) %>%
@@ -58,15 +56,13 @@ medals_per_country <- medals_per_country %>%
   mutate(Host = ifelse(Country == HostCountry, 1, 0)) %>% select(-HostCountry)
 
 # World data (cleaned)
-world_data <- read.csv(file.path(current_folder, "data/clean_world_data.csv"))
+world_data <- read.csv(file.path(current_folder, "../data/clean_world_data.csv"))
 
 head(medals_per_country)
 head(world_data)
 ```
 
-# Simple Model
-Lag information.
-Use only data since 1992.
+## Simple Model
 ```{r}
 # Filter olympic games previous to 1992 (keep 1988)
 medals_per_country <- medals_per_country %>% filter(Year >= 1988)
@@ -95,7 +91,8 @@ data_2016_top15 <- data_2016 %>% arrange(desc(TotalMedals)) %>% head(15)
 errors <- data_2016_top15$TotalMedals - data_2016_top15$PredMedals
 cat("Mean Absolute Error (MAE):", mean(abs(errors)), "\n")
 ```
-# Sophisticated Model
+
+## Sophisticated model
 ```{r}
 # Merge lagged_medals_per_country with world country data
 
@@ -111,6 +108,7 @@ world_data <- world_data %>%
 
 #medals_per_country %>% filter(Country %in% diff_countries)
 ```
+
 
 ```{r}
 # Inner merge (for now)
@@ -189,15 +187,4 @@ cat("Mean Absolute Error (MAE):", mean(abs(errors), na.rm = TRUE), "\n")
 
 library(car)
 vif(forward_model)
-```
-
-```{r}
-# Perform backward selection
-backward_model <- step(
-  full_model,
-  direction = "backward"
-)
-
-# Summarize the final model
-summary(backward_model)
 ```

@@ -16,7 +16,7 @@ library(ggplot2)
 # Load the data
 ```{r data}
 current_folder <- getwd()
-clean_data <- read.csv(file.path(current_folder, "data/clean_data.csv"))
+clean_data <- read.csv(file.path(current_folder, "../data/clean_data.csv"))
 
 head(clean_data)
 ```
